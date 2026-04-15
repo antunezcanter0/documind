@@ -1,0 +1,1 @@
+Este es un documento de prueba sobre inteligencia artificial. Los LLMs son modelos de lenguaje grandes que pueden procesar y generar texto. RAG es una técnica que combina búsqueda y generación.

@@ -19,7 +19,6 @@ class LLMService:
         max_tokens: int = 1000
     ) -> str:
         """Chat completion usando el modelo local de Ollama"""
-        # El código es IDÉNTICO
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -34,7 +33,6 @@ class LLMService:
         temperature: float = 0.7
     ) -> AsyncGenerator[str, None]:
         """Streaming de respuestas con el modelo local"""
-        # El código es IDÉNTICO
         stream = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,

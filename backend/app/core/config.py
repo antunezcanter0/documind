@@ -8,14 +8,15 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "DocuMind"
 
     # Database
-    POSTGRES_SERVER: str = "localhost"
+    POSTGRES_SERVER: str = "127.0.0.1"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "password"
     POSTGRES_DB: str = "documind"
+    POSTGRES_PORT: str = "5434"
 
     @property
     def DATABASE_URL(self) -> str:
-        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
+        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
     # --- CONFIGURACIÓN PARA OLLAMA (LOCAL) ---
     OPENAI_API_KEY: Optional[str] = "not-needed"  # Ollama no necesita clave
