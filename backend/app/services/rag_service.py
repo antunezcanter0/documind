@@ -1,5 +1,6 @@
 # app/services/rag_service.py
 import hashlib
+import time
 from typing import List, Dict, Any
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,8 @@ from sqlalchemy import select, func
 from app.models.document import Document, DocumentChunk
 from app.services.embedding_service import embedding_service
 from app.services.llm_service import llm_service
+from app.core.ai_logger import ai_logger, log_performance
+from app.core.cache import cache_manager, cache_rag_response
 
 
 class RAGService:
@@ -120,6 +123,8 @@ class RAGService:
         return results
 
     @staticmethod
+    @cache_rag_response()
+    @log_performance
     async def answer_question(
             db: AsyncSession,
             question: str,
@@ -131,10 +136,20 @@ class RAGService:
         2. Construye un prompt con el contexto
         3. Llama al LLM para generar la respuesta
         """
+        start_time = time.time()
+        
         # 1. Buscar chunks relevantes
         relevant_chunks = await RAGService.search(db, question, top_k)
 
         if not relevant_chunks:
+            duration = time.time() - start_time
+            ai_logger.log_rag_operation(
+                query=question,
+                documents_found=0,
+                chunks_used=0,
+                duration=duration,
+                has_context=False
+            )
             return {
                 "answer": "No encontré información relevante en los documentos para responder tu pregunta.",
                 "sources": [],
@@ -175,6 +190,17 @@ RESPUESTA:"""
                            }
                            for chunk in relevant_chunks
                        }.values())
+
+        # 6. Loggear operación RAG
+        duration = time.time() - start_time
+        ai_logger.log_rag_operation(
+            query=question,
+            documents_found=len(set(chunk["filename"] for chunk in relevant_chunks)),
+            chunks_used=len(relevant_chunks),
+            duration=duration,
+            has_context=True,
+            metadata={"avg_similarity": sum(chunk["similarity"] for chunk in relevant_chunks) / len(relevant_chunks)}
+        )
 
         return {
             "answer": answer,
