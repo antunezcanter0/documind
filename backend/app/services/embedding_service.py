@@ -1,7 +1,7 @@
+import asyncio
+
 from openai import AsyncOpenAI
 from app.core.config import settings
-from app.core.ai_logger import ai_logger, log_embedding_operation
-from app.core.metrics import ai_metrics
 from app.core.cache import cache_manager, cache_embedding
 from typing import List
 import tiktoken
@@ -12,53 +12,53 @@ class EmbeddingService:
         self.client = AsyncOpenAI(
             base_url=settings.OPENAI_BASE_URL,
             api_key=settings.OPENAI_API_KEY,
-            timeout=30.0
+            timeout=120.0,  # ← Aumentar timeout a 120 segundos
+            max_retries=3  # ← Reintentar automáticamente
         )
         self.model = settings.EMBEDDING_MODEL
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    @cache_embedding()
-    @log_embedding_operation(model_name="nomic-embed-text")
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Obtener embeddings para una lista de textos"""
-        import time
-        start_time = time.time()
-        success = True
-        
-        try:
-            response = await self.client.embeddings.create(
-                model=self.model,
-                input=texts
-            )
-            
-            # Registrar métricas
-            duration = time.time() - start_time
-            text_length = sum(len(text) for text in texts)
-            chunk_count = len(texts)
-            
-            ai_metrics.record_embedding_operation(
-                model_name=self.model,
-                text_length=text_length,
-                chunk_count=chunk_count,
-                duration=duration,
-                success=success
-            )
-            
-            return [item.embedding for item in response.data]
-            
-        except Exception as e:
-            duration = time.time() - start_time
-            text_length = sum(len(text) for text in texts)
-            chunk_count = len(texts)
-            
-            ai_metrics.record_embedding_operation(
-                model_name=self.model,
-                text_length=text_length,
-                chunk_count=chunk_count,
-                duration=duration,
-                success=False
-            )
-            raise
+        """Obtener embeddings para una lista de textos con manejo de errores"""
+        print(f"🔄 Iniciando embeddings para {len(texts)} textos")
+
+        # Procesar en lotes pequeños para evitar timeouts
+        batch_size = 50
+        all_embeddings = []
+
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            print(f"  📦 Procesando lote {i // batch_size + 1}/{(len(texts) - 1) // batch_size + 1}")
+
+            try:
+                # Intentar con timeout
+                response = await asyncio.wait_for(
+                    self.client.embeddings.create(
+                        model=self.model,
+                        input=batch
+                    ),
+                    timeout=60.0  # 60 segundos por lote
+                )
+                all_embeddings.extend([item.embedding for item in response.data])
+
+            except asyncio.TimeoutError:
+                print(f"  ⏰ Timeout en lote, reintentando...")
+                # Reintentar una vez
+                try:
+                    response = await self.client.embeddings.create(
+                        model=self.model,
+                        input=batch
+                    )
+                    all_embeddings.extend([item.embedding for item in response.data])
+                except Exception as e:
+                    print(f"  ❌ Error en reintento: {e}")
+                    raise
+            except Exception as e:
+                print(f"  ❌ Error en lote: {e}")
+                raise
+
+        print(f"✅ Embeddings completados: {len(all_embeddings)} vectores")
+        return all_embeddings
 
     async def get_embedding(self, text: str) -> List[float]:
         """Obtener embedding para un solo texto"""
@@ -66,15 +66,15 @@ class EmbeddingService:
         return embeddings[0]
 
     def count_tokens(self, text: str) -> int:
-        """Contar tokens para control de costos"""
         return len(self.tokenizer.encode(text))
 
-    def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
-        """Dividir texto en chunks para procesar"""
+    def chunk_text(self, text: str, chunk_size: int = 1200, overlap: int = 200):
         tokens = self.tokenizer.encode(text)
-        chunks = []
 
-        for i in range(0, len(tokens), chunk_size - overlap):
+        chunks = []
+        step = chunk_size - overlap
+
+        for i in range(0, len(tokens), step):
             chunk_tokens = tokens[i:i + chunk_size]
             chunk_text = self.tokenizer.decode(chunk_tokens)
             chunks.append(chunk_text)

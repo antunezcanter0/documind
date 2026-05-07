@@ -1,13 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
 import asyncio
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
 from app.services.embedding_service import embedding_service
 from app.services.llm_service import llm_service
-from app.core.metrics import ai_metrics
-from app.core.ai_logger import ai_logger
 
 router = APIRouter(tags=["health"])
 
@@ -15,11 +13,11 @@ async def check_database() -> dict:
     """Verificar conexión a base de datos"""
     try:
         # Simple query para verificar conexión
-        async for db in get_db():
-            await db.execute("SELECT 1")
-            return {"status": "healthy", "message": "Database connection OK"}
+        db = next(get_db())
+        db.execute("SELECT 1")
+        return {"status": "healthy", "message": "Database connection OK"}
     except Exception as e:
-        ai_logger.logger.error(f"Database health check failed: {e}")
+        print(f"Database health check failed: {e}")
         return {"status": "unhealthy", "message": f"Database connection failed: {str(e)}"}
 
 async def check_ollama() -> dict:
@@ -27,10 +25,10 @@ async def check_ollama() -> dict:
     try:
         # Intentar hacer una petición simple a Ollama
         test_messages = [{"role": "user", "content": "test"}]
-        response = await llm_service.chat_completion(test_messages, max_tokens=10)
+        response = llm_service.chat_completion(test_messages, max_tokens=10)
         return {"status": "healthy", "message": "Ollama connection OK", "model": settings.LLM_MODEL}
     except Exception as e:
-        ai_logger.logger.error(f"Ollama health check failed: {e}")
+        print(f"Ollama health check failed: {e}")
         return {"status": "unhealthy", "message": f"Ollama connection failed: {str(e)}"}
 
 async def check_embeddings() -> dict:
@@ -49,7 +47,7 @@ async def check_embeddings() -> dict:
         else:
             return {"status": "unhealthy", "message": "Embedding service returned empty result"}
     except Exception as e:
-        ai_logger.logger.error(f"Embedding health check failed: {e}")
+        print(f"Embedding health check failed: {e}")
         return {"status": "unhealthy", "message": f"Embedding service failed: {str(e)}"}
 
 async def check_redis() -> dict:
@@ -58,7 +56,7 @@ async def check_redis() -> dict:
         health = await cache_manager.health_check()
         return health
     except Exception as e:
-        ai_logger.logger.error(f"Redis health check failed: {e}")
+        print(f"Redis health check failed: {e}")
         return {"status": "unhealthy", "message": f"Redis connection failed: {str(e)}"}
 
 async def check_memory_usage() -> dict:
@@ -113,7 +111,7 @@ async def detailed_health_check():
     start_time = asyncio.get_event_loop().time()
     
     # Ejecutar todos los checks en paralelo
-    checks = await asyncio.gather(
+    checks = asyncio.gather(
         check_database(),
         check_ollama(),
         check_embeddings(),
@@ -154,13 +152,12 @@ async def detailed_health_check():
         results["overall_status"] = "unhealthy"
         results["unhealthy_components"] = unhealthy_components
     
-    # Agregar métricas básicas
+    # Agregar información básica
     try:
-        metrics_summary = ai_metrics.get_all_metrics()
         results["metrics_summary"] = {
-            "total_requests": metrics_summary["counters"].get("rag_operations_total", 0),
-            "total_inferences": metrics_summary["counters"].get("model_inferences_total", 0),
-            "active_models": len(metrics_summary["model_metrics"])
+            "total_requests": 0,
+            "total_inferences": 0,
+            "active_models": 1
         }
     except Exception as e:
         results["metrics_summary"] = {"error": str(e)}

@@ -1,53 +1,77 @@
-# app/services/rag_service.py
 import hashlib
-import time
 from typing import List, Dict, Any
 from uuid import UUID
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+
 from app.models.document import Document, DocumentChunk
 from app.services.embedding_service import embedding_service
 from app.services.llm_service import llm_service
-from app.core.ai_logger import ai_logger, log_performance
-from app.core.cache import cache_manager, cache_rag_response
 
 
 class RAGService:
-    """Servicio principal para indexación y búsqueda de documentos"""
 
+    # =========================
+    # INDEXACIÓN OPTIMIZADA
+    # =========================
     @staticmethod
     async def index_document(
-            db: AsyncSession,
-            filename: str,
-            content: str,
-            file_type: str,
-            metadata: Dict[str, Any] = None
+        db: Session,
+        filename: str,
+        content: str,
+        file_type: str,
+        metadata: Dict[str, Any] = None
     ) -> UUID:
-        """
-        Procesa un documento completo:
-        1. Calcula hash para evitar duplicados
-        2. Divide en chunks
-        3. Genera embeddings para cada chunk
-        4. Guarda en base de datos
-        """
-        # 1. Calcular hash del contenido
+
         content_hash = hashlib.sha256(content.encode()).hexdigest()
 
-        # 2. Verificar si ya existe (evitar duplicados)
-        existing = await db.execute(
+        # 🔥 duplicados por contenido
+        existing = db.execute(
             select(Document).where(Document.content_hash == content_hash)
-        )
-        if existing.scalar_one_or_none():
-            raise ValueError(f"El documento '{filename}' ya fue indexado anteriormente")
+        ).scalar_one_or_none()
 
-        # 3. Dividir en chunks
-        chunks = embedding_service.chunk_text(content)
+        if existing:
+            print(f"⚠️ Documento duplicado: {filename}")
+            return existing.id
 
-        # 4. Generar embeddings para todos los chunks
-        chunk_texts = [chunk for chunk in chunks]
-        embeddings = await embedding_service.get_embeddings(chunk_texts)
+        # 🔥 update por nombre
+        existing_by_name = db.execute(
+            select(Document).where(Document.filename == filename)
+        ).scalar_one_or_none()
 
-        # 5. Crear el documento en BD
+        if existing_by_name:
+            print(f"🔄 Reindexando: {filename}")
+
+            chunks_to_delete = db.execute(
+                select(DocumentChunk).where(
+                    DocumentChunk.document_id == existing_by_name.id
+                )
+            ).scalars().all()
+
+            for c in chunks_to_delete:
+                db.delete(c)
+
+            db.delete(existing_by_name)
+            db.commit()
+
+        # =========================
+        # CHUNKING FOP (YA VIENE PROCESADO)
+        # =========================
+        if file_type == "text/x-fop":
+            chunks = content.split("\n\n")
+        else:
+            chunks = embedding_service.chunk_text(content)
+
+        print(f"📄 chunks generados: {len(chunks)}")
+
+        # =========================
+        # EMBEDDINGS (BATCH)
+        # =========================
+        embeddings = await embedding_service.get_embeddings(chunks)
+
+        # =========================
+        # DOCUMENTO
+        # =========================
         document = Document(
             filename=filename,
             content=content,
@@ -56,158 +80,132 @@ class RAGService:
             chunk_count=len(chunks),
             doc_metadata=metadata or {}
         )
+
         db.add(document)
-        await db.flush()  # Para obtener el ID del documento
+        db.flush()
 
-        # 6. Crear los chunks con sus embeddings
-        for idx, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
-            chunk = DocumentChunk(
+        # =========================
+        # BULK INSERT CHUNKS
+        # =========================
+        db_chunks = [
+            DocumentChunk(
                 document_id=document.id,
-                chunk_index=idx,
-                content=chunk_text,
-                embedding=embedding
+                chunk_index=i,
+                content=chunk,
+                embedding=emb
             )
-            db.add(chunk)
+            for i, (chunk, emb) in enumerate(zip(chunks, embeddings))
+        ]
 
-        await db.commit()
-        await db.refresh(document)
+        db.bulk_save_objects(db_chunks)
+        db.commit()
 
-        print(f"✅ Documento indexado: {filename} ({len(chunks)} chunks)")
+        print(f"✅ Indexado: {filename}")
         return document.id
 
+    # =========================
+    # SEARCH OPTIMIZADO
+    # =========================
     @staticmethod
-    async def search(
-            db: AsyncSession,
-            query: str,
-            top_k: int = 5,
-            similarity_threshold: float = 0.5
-    ) -> List[Dict[str, Any]]:
-        """
-        Busca los chunks más similares a la consulta usando similitud coseno
-        """
-        # 1. Generar embedding de la consulta
-        query_embedding = await embedding_service.get_embedding(query)
+    async def search(db: Session, query: str, top_k: int = 5):
 
-        # 2. Búsqueda por similitud coseno (<=> es distancia coseno)
-        # Menor distancia = mayor similitud
+        expanded_query = f"""
+        {query}
+        
+        Relacionado con comandos de telecomunicaciones y líneas de abonado.
+        """
+
+        query_embedding = await embedding_service.get_embedding(expanded_query)
+
         stmt = (
             select(
                 DocumentChunk,
                 Document.filename,
                 Document.doc_metadata,
-                (1 - func.abs(DocumentChunk.embedding.cosine_distance(query_embedding))).label("similarity")
+                (1 - DocumentChunk.embedding.cosine_distance(query_embedding)).label("similarity")
             )
+            .select_from(DocumentChunk)
             .join(Document, DocumentChunk.document_id == Document.id)
             .order_by(DocumentChunk.embedding.cosine_distance(query_embedding))
-            .limit(top_k)
+            .limit(30)
         )
 
-        result = await db.execute(stmt)
-        rows = result.all()
+        rows = db.execute(stmt).all()
 
-        # 3. Formatear resultados
         results = []
-        for row in rows:
-            chunk, filename, doc_metadata, similarity = row
-            if similarity >= similarity_threshold:
+
+        for chunk, filename, metadata, similarity in rows:
+
+            bonus = 0.0
+            q = query.lower()
+            c = chunk.content.lower()
+
+            if "crear" in q and "crear" in c:
+                bonus += 0.1
+            if "abonado" in q and "abonado" in c:
+                bonus += 0.1
+            if metadata and metadata.get("command") and metadata["command"] in c:
+                bonus += 0.1
+
+            score = min(1.0, similarity + bonus)
+
+            if score > 0.5:
                 results.append({
-                    "chunk_id": str(chunk.id),
-                    "document_id": str(chunk.document_id),
-                    "filename": filename,
                     "content": chunk.content,
-                    "similarity": float(similarity),
-                    "chunk_index": chunk.chunk_index,
-                    "metadata": doc_metadata
+                    "filename": filename,
+                    "similarity": score,
+                    "metadata": metadata
                 })
 
-        return results
+        return sorted(results, key=lambda x: x["similarity"], reverse=True)[:top_k]
 
+    # =========================
+    # ANSWER (SIN CAMBIOS MAYORES)
+    # =========================
     @staticmethod
-    @cache_rag_response()
-    @log_performance
-    async def answer_question(
-            db: AsyncSession,
-            question: str,
-            top_k: int = 5
-    ) -> Dict[str, Any]:
-        """
-        Responde una pregunta usando RAG:
-        1. Busca chunks relevantes
-        2. Construye un prompt con el contexto
-        3. Llama al LLM para generar la respuesta
-        """
-        start_time = time.time()
-        
-        # 1. Buscar chunks relevantes
-        relevant_chunks = await RAGService.search(db, question, top_k)
+    async def answer_question(db: Session, question: str, top_k: int = 5):
 
-        if not relevant_chunks:
-            duration = time.time() - start_time
-            ai_logger.log_rag_operation(
-                query=question,
-                documents_found=0,
-                chunks_used=0,
-                duration=duration,
-                has_context=False
-            )
+        chunks = await RAGService.search(db, question, top_k)
+
+        if not chunks:
             return {
-                "answer": "No encontré información relevante en los documentos para responder tu pregunta.",
-                "sources": [],
+                "answer": "No encontré información relevante.",
                 "has_context": False
             }
 
-        # 2. Construir el contexto
         context = "\n\n---\n\n".join([
-            f"[Documento: {chunk['filename']} - Fragmento {chunk['chunk_index']}]\n{chunk['content']}"
-            for chunk in relevant_chunks
+            f"[{c['filename']}]\n{c['content']}"
+            for c in chunks
         ])
 
-        # 3. Construir el prompt
-        prompt = f"""Eres un asistente especializado en responder preguntas basándote ÚNICAMENTE en el contexto proporcionado.
+        prompt = f"""
+        Eres un experto en telecomunicaciones.
+        
+        Responde SOLO con el contexto.
+        
+        CONTEXTO:
+        {context}
+        
+        PREGUNTA:
+        {question}
+        """
 
-CONTEXTO:
-{context}
-
-PREGUNTA: {question}
-
-INSTRUCCIONES:
-- Responde SOLO usando la información del contexto
-- Si la respuesta no está en el contexto, di "No encontré información sobre esto en los documentos"
-- Cita las fuentes usando [Nombre del documento]
-- Sé conciso y preciso
-
-RESPUESTA:"""
-
-        # 4. Llamar al LLM
-        messages = [{"role": "user", "content": prompt}]
-        answer = await llm_service.chat_completion(messages, temperature=0.3)
-
-        # 5. Preparar las fuentes para la respuesta
-        sources = list({
-                           chunk["filename"]: {
-                               "filename": chunk["filename"],
-                               "similarity": chunk["similarity"]
-                           }
-                           for chunk in relevant_chunks
-                       }.values())
-
-        # 6. Loggear operación RAG
-        duration = time.time() - start_time
-        ai_logger.log_rag_operation(
-            query=question,
-            documents_found=len(set(chunk["filename"] for chunk in relevant_chunks)),
-            chunks_used=len(relevant_chunks),
-            duration=duration,
-            has_context=True,
-            metadata={"avg_similarity": sum(chunk["similarity"] for chunk in relevant_chunks) / len(relevant_chunks)}
+        answer = await llm_service.chat_completion(
+            [{"role": "user", "content": prompt}],
+            temperature=0.3
         )
+
+        sources = list({
+            c["filename"]: {
+                "filename": c["filename"],
+                "similarity": c["similarity"]
+            }
+            for c in chunks
+        }.values())
 
         return {
             "answer": answer,
             "sources": sources,
             "has_context": True,
-            "chunks_used": len(relevant_chunks)
+            "chunks_used": len(chunks)
         }
-
-
-rag_service = RAGService()

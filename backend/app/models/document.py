@@ -20,8 +20,6 @@ class Document(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Vector embeddings se manejarán con pgvector en otra tabla
-
 
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"

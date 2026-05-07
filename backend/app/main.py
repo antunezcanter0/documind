@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api import health, documents, chat, metrics, cache, tasks, auth
+from app.api import health, documents, chat, cache
 from app.core.cache import cache_manager
 
 app = FastAPI(
@@ -21,12 +21,9 @@ app.add_middleware(
 
 # Routers
 app.include_router(health.router, prefix=settings.API_V1_STR)
-app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(documents.router, prefix=settings.API_V1_STR)
 app.include_router(chat.router, prefix=settings.API_V1_STR)
-app.include_router(metrics.router, prefix=settings.API_V1_STR)
 app.include_router(cache.router, prefix=settings.API_V1_STR)
-app.include_router(tasks.router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():

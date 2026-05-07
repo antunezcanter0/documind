@@ -32,17 +32,7 @@ class Settings(BaseSettings):
         auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
         return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
-    # Cache TTL (seconds)
-    EMBEDDING_CACHE_TTL: int = 3600  # 1 hour
-    RAG_CACHE_TTL: int = 300         # 5 minutes
-    LLM_CACHE_TTL: int = 600         # 10 minutes
-
-    # Security
-    SECRET_KEY: str = "your-secret-key-change-in-production"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
+    
     # --- CONFIGURACIÓN PARA OLLAMA (LOCAL) ---
     OPENAI_API_KEY: Optional[str] = "not-needed"  # Ollama no necesita clave
     # La URL base para la API local de Ollama
@@ -51,6 +41,11 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "llama3.2:3b"
     # El modelo para embeddings (usaremos uno compatible)
     EMBEDDING_MODEL: str = "nomic-embed-text"  # Modelo popular para embeddings local
+
+    # Development
+    DEBUG: bool = False
+    LOG_LEVEL: str = "INFO"
+    RELOAD: bool = False
 
     class Config:
         env_file = ".env"

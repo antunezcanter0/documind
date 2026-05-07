@@ -1,27 +1,32 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 from app.core.config import settings
 
-# Convertir URL a async format (postgresql:// -> postgresql+asyncpg://)
-async_database_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+# Usar conexión síncrona para evitar timeouts de asyncpg
+database_url = settings.DATABASE_URL
 
-engine = create_async_engine(
-    async_database_url,
-    echo=True,  # En producción, poner False
-    future=True
+engine = create_engine(
+    database_url,
+    echo=False,  # Reducir verbosidad
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_recycle=3600,
+    connect_args={
+        "application_name": "documind_backend"
+    }
 )
 
-AsyncSessionLocal = async_sessionmaker(
+SessionLocal = sessionmaker(
     engine,
-    class_=AsyncSession,
     expire_on_commit=False
 )
 
 Base = declarative_base()
 
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+def get_db():
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()

@@ -1,10 +1,10 @@
 # app/api/chat.py
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from app.core.database import get_db
-from app.services.rag_service import rag_service
+from app.services.rag_service import RAGService
 from app.services.llm_service import llm_service
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -31,13 +31,13 @@ class SearchRequest(BaseModel):
 @router.post("/ask", response_model=ChatResponse)
 async def ask_question(
         request: ChatRequest,
-        db: AsyncSession = Depends(get_db)
+        db: Session = Depends(get_db)
 ):
     """Hacer una pregunta usando RAG sobre los documentos indexados"""
 
     if request.use_rag:
         # Usar RAG para responder
-        result = await rag_service.answer_question(
+        result = await RAGService.answer_question(
             db=db,
             question=request.question,
             top_k=request.top_k
@@ -58,8 +58,8 @@ async def ask_question(
 @router.post("/search")
 async def search_documents(
     request: SearchRequest,
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """Buscar documentos relevantes sin generar respuesta"""
-    results = await rag_service.search(db, request.query, request.top_k)
+    results = await RAGService.search(db, request.query, request.top_k)
     return {"results": results, "count": len(results)}

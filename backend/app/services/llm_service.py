@@ -1,7 +1,6 @@
 # app/services/llm_service.py
 from openai import AsyncOpenAI
 from app.core.config import settings
-from app.core.ai_logger import ai_logger, log_model_inference
 from app.core.cache import cache_manager, cache_llm_response
 from typing import List, Dict, Any, AsyncGenerator
 
@@ -15,7 +14,6 @@ class LLMService:
         self.model = settings.LLM_MODEL
 
     @cache_llm_response()
-    @log_model_inference(model_name="llama3.2:3b")
     async def chat_completion(
         self,
         messages: List[Dict[str, str]],
