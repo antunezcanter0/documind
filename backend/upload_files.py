@@ -14,9 +14,7 @@ UPLOAD_ENDPOINT = f"{API_BASE_URL}/documents/upload"
 
 # Directorios con archivos
 DIRECTORIOS = [
-    # "/home/ariel/Programacion/IA/documind/backend/files/prmtros",
     "/home/ariel/Programacion/IA/documind/backend/files/guiaComandos"
-    # "/home/ariel/Programacion/IA/documind/backend/files/prmtros1"
 ]
 
 # Tipos de archivo permitidos (basados en los archivos encontrados)
@@ -26,7 +24,7 @@ async def upload_file(session, file_path):
     """Subir un archivo individual"""
     try:
         filename = os.path.basename(file_path)
-        
+
         async with aiofiles.open(file_path, 'rb') as f:
             file_content = await f.read()
         

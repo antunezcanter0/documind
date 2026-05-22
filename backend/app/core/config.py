@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     # La URL base para la API local de Ollama
     OPENAI_BASE_URL: str = "http://localhost:11434/v1"
     # El modelo que descargaste (ej: llama3.2:3b, qwen3:8b, etc.)
-    LLM_MODEL: str = "llama3.2:3b"
+    # LLM_MODEL: str = "llama3.2:3b"
+    LLM_MODEL: str = "qwen2.5:3b-instruct-q4_K_M"
     # El modelo para embeddings (usaremos uno compatible)
     EMBEDDING_MODEL: str = "nomic-embed-text"  # Modelo popular para embeddings local
 

@@ -1,6 +1,7 @@
-from sqlalchemy import Column, String, Text, DateTime, Integer, Float, JSON, Index
+from sqlalchemy import Column, String, Text, DateTime, Integer, Float, JSON, Index, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.core.database import Base
 from pgvector.sqlalchemy import Vector
 import uuid
@@ -37,4 +38,20 @@ class DocumentChunk(Base):
     __table_args__ = (
         Index('idx_chunk_embedding', embedding, postgresql_using='hnsw', 
               postgresql_ops={'embedding': 'vector_cosine_ops'}),
+    )
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(String(255), nullable=False, unique=True, index=True)
+    messages = Column(JSON, default=list)  # [{"role": "user", "content": "...", "timestamp": "..."}]
+    conv_metadata = Column(JSON, default=dict)  # Renombrado para evitar conflicto con metadata reservado
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    __table_args__ = (
+        Index('idx_conversation_session', 'session_id'),
     )

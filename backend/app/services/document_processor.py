@@ -10,6 +10,17 @@ class FOPParser:
     """Parser robusto para archivos FOP"""
 
     @staticmethod
+    def _clean_field(text: str) -> str:
+        """Limpiar campos: remover espacios excesivos, caracteres especiales, acentos"""
+        # Remover caracteres especiales como ! " * ? etc.
+        text = re.sub(r'[!"*?\-+=\|\\]+', ' ', text)
+        # Remover espacios en blanco excesivos
+        text = re.sub(r'\s+', ' ', text)
+        # Remover caracteres de control
+        text = ''.join(char for char in text if ord(char) >= 32 or char in '\n\t')
+        return text.strip()
+
+    @staticmethod
     def parse(text: str) -> Dict[str, str]:
         lines = [l.strip() for l in text.splitlines() if l.strip()]
 
@@ -29,15 +40,15 @@ class FOPParser:
 
             # COMANDO
             if "COMANDO" in line:
-                sections["command"] = line.split(":")[-1].strip()
+                sections["command"] = FOPParser._clean_field(line.split(":")[-1])
 
             # FUNCION
             elif "FUNCION" in line:
-                sections["function"] = line.split(":")[-1].strip()
+                sections["function"] = FOPParser._clean_field(line.split(":")[-1])
 
             # DESCRIPCIÓN (línea libre posterior)
             elif "COMANDO" in line and ":" in line:
-                sections["description"] += line + " "
+                sections["description"] += FOPParser._clean_field(line) + " "
 
             # OBJETIVO
             elif re.match(r"^\d+\s+OBJETIVO", line):
@@ -46,13 +57,13 @@ class FOPParser:
 
             # PROCEDIMIENTO
             elif re.match(r"^\d+\s+PROCEDIMIENTO", line):
-                sections["objective"] = " ".join(buffer).strip()
+                sections["objective"] = FOPParser._clean_field(" ".join(buffer))
                 current = "procedure"
                 buffer = []
 
             # EJEMPLO
             elif re.match(r"^\d+\s+EJEMPLO", line):
-                sections["procedure"] = " ".join(buffer).strip()
+                sections["procedure"] = FOPParser._clean_field(" ".join(buffer))
                 current = "examples"
                 buffer = []
 
@@ -61,7 +72,7 @@ class FOPParser:
                     buffer.append(line)
 
         if current == "examples":
-            sections["examples"] = " ".join(buffer).strip()
+            sections["examples"] = FOPParser._clean_field(" ".join(buffer))
 
         return sections
 
@@ -87,29 +98,19 @@ class DocumentProcessor:
         parser = FOPParser()
         sections = parser.parse(text)
 
-        def clean(x):
-            return re.sub(r'\s+', ' ', x).strip().lower()
-
-        # 🔥 CHUNK SEMÁNTICO
-        semantic = f"""
-            COMANDO: {sections['command']}
-            FUNCIÓN: {sections['function']}
-            DESCRIPCIÓN: {sections['description']}
-            OBJETIVO: {sections['objective']}
-        """
+        # 🔥 CHUNK SEMÁNTICO - Enfatizar comando y función para mejor búsqueda
+        semantic = f"""COMANDO: {sections['command']}
+FUNCIÓN: {sections['function']}
+OBJETIVO: {sections['objective']}
+DESCRIPCIÓN: {sections['description']}"""
 
         # 🔥 CHUNK TÉCNICO
-        technical = f"""
-            PROCEDIMIENTO:
-            {sections['procedure']}
-        """
+        technical = f"""PROCEDIMIENTO:\n{sections['procedure']}"""
 
         # 🔥 CHUNK EJEMPLOS
-        examples = f"""
-            EJEMPLOS:
-            {sections['examples']}
-        """
+        examples = f"""EJEMPLOS:\n{sections['examples']}"""
 
+        # Crear chunks con mejor separación para mantener términos clave juntos
         full_text = "\n\n".join([semantic, technical, examples])
 
         metadata = {

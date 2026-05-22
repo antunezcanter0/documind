@@ -23,7 +23,7 @@ async def upload_document(
     allowed_types = [
         "application/octet-stream", # Para archivos .fop y otros binarios
     ]
-
+    
     if file.content_type not in allowed_types:
         raise HTTPException(400, f"Tipo no soportado: {file.filename}")
 
@@ -31,9 +31,24 @@ async def upload_document(
         # Leer contenido
         content = await file.read()
 
-        text_content, metadata = await DocumentProcessor.process_fop(
-            content=content
-        )
+        # Decodificar contenido para FOP files
+        text_content = None
+        for enc in ["utf-8", "latin-1", "cp1252"]:
+            try:
+                text_content = content.decode(enc)
+                break
+            except:
+                continue
+
+        if not text_content:
+            raise ValueError("No se pudo decodificar el archivo")
+
+        # Extraer metadata básica
+        metadata = {
+            "original_name": file.filename,
+            "type": "fop" if file.filename.lower().endswith('.fop') else "unknown"
+        }
+        
 
         try:
             doc_id = await RAGService.index_document(
@@ -41,10 +56,7 @@ async def upload_document(
                 filename=file.filename,
                 content=text_content,
                 file_type=file.content_type,
-                metadata={
-                    **metadata,
-                    "original_name": file.filename,
-                }
+                metadata=metadata
             )
         except Exception as e:
             return {
